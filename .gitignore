@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.venv/
+test-venv/
+
+# Node.js
+node_modules/
+npm-debug.log*
+
+# Database
+*.db
+
+# Test/generated files
+.pytest_cache/
+test-results.txt
+test-*.json
+tests/test_sample.txt
+
+# Backups
+*.tar.gz
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+fabric-samples/

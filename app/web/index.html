@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confidential SBOM Verification</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 950px;
+            margin: 0 auto;
+            padding: 30px 20px;
+            background: #f4f6f8;
+            color: #1f2937;
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #6b7280;
+            margin-bottom: 35px;
+        }
+
+        .section {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+
+        h2 {
+            margin-top: 0;
+        }
+
+        input,
+        textarea {
+            width: 95%;
+            padding: 10px;
+            margin: 8px 0;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+        }
+
+        textarea {
+            min-height: 100px;
+            font-family: monospace;
+        }
+
+        button {
+            padding: 11px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            background: #2563eb;
+            color: white;
+            font-weight: bold;
+            margin-top: 8px;
+        }
+
+        button:hover {
+            background: #1d4ed8;
+        }
+
+        pre {
+            background: #111827;
+            color: #f9fafb;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            margin-top: 15px;
+        }
+
+        .status {
+            font-size: 22px;
+            font-weight: bold;
+            margin: 15px 0;
+        }
+
+        .info {
+            background: #eff6ff;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+    </style>
+</head>
+
+<body>
+
+    <h1>🔐 Decentralized SBOM Verification</h1>
+
+    <p class="subtitle">
+        Blockchain-Based Confidential SBOM Verification for Cloud Software Security
+    </p>
+
+    <div class="section">
+        <h2>1. Register SBOM</h2>
+
+        <div class="info">
+            Upload an SBOM to generate its cryptographic proof,
+            Merkle root, and blockchain verification record.
+        </div>
+
+        <form id="registerForm">
+            <input type="file" id="registerFile" accept=".json" required>
+            <br>
+            <button type="submit">Register SBOM</button>
+        </form>
+
+        <pre id="registerResult"></pre>
+    </div>
+
+
+    <div class="section">
+        <h2>2. Verify Complete SBOM</h2>
+
+        <div class="info">
+            Verify that the submitted SBOM and proof match the
+            blockchain record.
+        </div>
+
+        <form id="verifyForm">
+            <input
+                type="text"
+                id="verificationId"
+                placeholder="Verification ID"
+                required
+            >
+
+            <input
+                type="text"
+                id="proof"
+                placeholder="Proof"
+                required
+            >
+
+            <input
+                type="file"
+                id="verifyFile"
+                accept=".json"
+                required
+            >
+
+            <br>
+            <button type="submit">Verify SBOM</button>
+        </form>
+
+        <div id="verifyStatus" class="status"></div>
+
+        <pre id="verifyResult"></pre>
+    </div>
+
+
+    <div class="section">
+        <h2>3. Verify Selected Claim</h2>
+
+        <div class="info">
+            Verify a selected SBOM claim using its Merkle proof
+            without submitting the complete SBOM.
+        </div>
+
+        <input
+            type="text"
+            id="claimVerificationId"
+            placeholder="Verification ID"
+        >
+
+        <input
+            type="text"
+            id="claimValue"
+            placeholder="Selected claim, e.g. fastapi:0.141.1"
+        >
+
+        <textarea
+            id="merkleProof"
+            placeholder="Paste Merkle proof JSON here"
+        ></textarea>
+
+        <br>
+        <button onclick="verifyClaim()">Verify Claim</button>
+
+        <div id="claimStatus" class="status"></div>
+
+        <pre id="claimResult"></pre>
+    </div>
+
+
+    <div class="section">
+        <h2>4. Verification History</h2>
+
+        <div class="info">
+            View previously registered SBOM verification records.
+        </div>
+
+        <button onclick="loadHistory()">Load Verification History</button>
+
+        <pre id="historyResult"></pre>
+    </div>
+
+
+<script>
+document.getElementById("registerForm").addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    const file = document.getElementById("registerFile").files[0];
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch("/register-verification", {
+        method: "POST",
+        body: formData
+    });
+
+    const result = await response.json();
+
+    document.getElementById("registerResult").textContent =
+        JSON.stringify(result, null, 2);
+});
+</script>
+
+
+<script>
+document.getElementById("verifyForm").addEventListener("submit", async function(event) {
+    event.preventDefault();
+
+    const verificationId =
+        document.getElementById("verificationId").value;
+
+    const proof =
+        document.getElementById("proof").value;
+
+    const file =
+        document.getElementById("verifyFile").files[0];
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const response = await fetch(
+        "/verify/" +
+        encodeURIComponent(verificationId) +
+        "?proof=" +
+        encodeURIComponent(proof),
+        {
+            method: "POST",
+            body: formData
+        }
+    );
+
+    const result = await response.json();
+
+    const status =
+        document.getElementById("verifyStatus");
+
+    status.textContent = result.status;
+
+    if (result.status === "VERIFIED") {
+        status.textContent = "✓ SBOM VERIFIED";
+    } else {
+        status.textContent = "✗ SBOM NOT VERIFIED";
+    }
+
+    document.getElementById("verifyResult").textContent =
+        JSON.stringify(result, null, 2);
+});
+</script>
+
+
+<script>
+async function verifyClaim() {
+
+    const id =
+        document.getElementById("claimVerificationId").value;
+
+    const claim =
+        document.getElementById("claimValue").value;
+
+    const proof =
+        document.getElementById("merkleProof").value;
+
+    const response = await fetch(
+        "/verify-claim/" +
+        encodeURIComponent(id) +
+        "?claim=" +
+        encodeURIComponent(claim) +
+        "&merkle_proof=" +
+        encodeURIComponent(proof),
+        {
+            method: "POST"
+        }
+    );
+
+    const data = await response.json();
+
+    const status =
+        document.getElementById("claimStatus");
+
+    if (data.proof_valid === true) {
+        status.textContent = "✓ CLAIM VERIFIED";
+    } else {
+        status.textContent = "✗ CLAIM NOT VERIFIED";
+    }
+
+    document.getElementById("claimResult").textContent =
+        JSON.stringify(data, null, 2);
+}
+</script>
+
+
+<script>
+async function loadHistory() {
+
+    const response =
+        await fetch("/verification-history");
+
+    const data =
+        await response.json();
+
+    document.getElementById("historyResult").textContent =
+        JSON.stringify(data, null, 2);
+}
+</script>
+
+</body>
+</html>
