@@ -30,3 +30,5 @@ tests/test_sample.txt
 .idea/
 .DS_Store
 fabric-samples/
+app/tests/test_sample.txt
+app/web/index-backup.html
