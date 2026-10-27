@@ -1,0 +1,11 @@
+test_type,run,http_status,signature_status,latency_ms
+valid,1,200,VALID,17.191
+valid,2,200,VALID,3.691
+valid,3,200,VALID,3.252
+valid,4,200,VALID,3.2
+valid,5,200,VALID,2.783
+tampered,1,200,INVALID,2.452
+tampered,2,200,INVALID,3.242
+tampered,3,200,INVALID,2.617
+tampered,4,200,INVALID,3.381
+tampered,5,200,INVALID,3.041

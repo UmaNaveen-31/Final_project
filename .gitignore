@@ -46,3 +46,7 @@ app/web/index-backup.html
 *.backup
 *.backup-*
 *.before-*
+
+# SBOM Sentinel local databases and backups
+app/verification.db
+app/verification.db.*

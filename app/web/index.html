@@ -177,6 +177,11 @@
         <form id="claimForm">
           <div class="field"><label for="claimVerificationId">Verification ID</label><input type="text" id="claimVerificationId" placeholder="e.g. VER-38070D9B" autocomplete="off" required></div>
           <div class="field"><label for="claimValue">Dependency claim</label><input type="text" id="claimValue" placeholder="fastapi:0.141.1" autocomplete="off" required><p class="help">Use the component name and version format extracted by this application.</p></div>
+<div class="field">
+  <label for="claimFile">Upload SBOM to verify</label>
+  <input type="file" id="claimFile" accept=".json,application/json" required>
+  <p class="help">Upload the original SBOM to verify a claim, or a modified SBOM to test tamper detection.</p>
+</div>
           <button class="btn" type="submit">Verify claim <span aria-hidden="true">→</span></button>
         </form>
         <div id="claimStatus" class="status-line" role="status" aria-live="polite"></div>
@@ -191,6 +196,74 @@
           <div><div style="font-weight:750;font-size:.88rem">Ledger record</div><p class="card-intro" style="margin-top:4px">Uses the verification record returned by Hyperledger Fabric as the reference for these checks.</p></div>
         </div>
       </article>
+
+      <article class="card card-wide" id="vulnerability-scanner">
+        <div class="card-heading">
+          <span class="icon-box" aria-hidden="true">⚠</span>
+          <div>
+            <h2>Vulnerability Scanner</h2>
+            <p class="card-intro">Check supported PyPI packages against the OSV vulnerability database.</p>
+          </div>
+        </div>
+
+        <form id="vulnerabilityForm">
+          <div class="field">
+            <label for="vulnerabilityFile">SBOM JSON file</label>
+            <input type="file" id="vulnerabilityFile"
+                   accept=".json,application/json" required>
+            <p class="help">Unsupported components and failed queries will be reported separately.</p>
+          </div>
+          <button class="btn" type="submit">Scan for vulnerabilities →</button>
+        </form>
+
+        <div id="vulnerabilityStatus" class="status-line"
+             role="status" aria-live="polite"></div>
+
+        <div id="vulnerabilitySummary" hidden>
+          <div class="stats" style="margin-top:18px">
+            <div class="stat">
+              <div class="stat-top">Packages checked</div>
+              <div class="stat-value" id="vulnChecked">—</div>
+              <div class="stat-note" id="vulnCoverage">Coverage unavailable</div>
+            </div>
+            <div class="stat">
+              <div class="stat-top">Unique package/advisory pairs</div>
+              <div class="stat-value" id="vulnCount">—</div>
+              <div class="stat-note">Reported by OSV</div>
+            </div>
+            <div class="stat">
+              <div class="stat-top">Provisional risk score</div>
+              <div class="stat-value" id="vulnRisk">—</div>
+              <div class="stat-note">Project score, not CVSS</div>
+            </div>
+          </div>
+
+          <p id="vulnScanStatus" class="card-intro" style="margin-top:16px"></p>
+
+          <div class="table-wrap" style="margin-top:16px">
+            <table>
+              <thead>
+                <tr>
+                  <th>Package</th>
+                  <th>Version</th>
+                  <th>Advisory ID</th>
+                  <th>Summary</th>
+                  <th>Severity data from OSV</th>
+                </tr>
+              </thead>
+              <tbody id="vulnerabilityBody">
+                <tr><td colspan="5" class="empty">Run a scan to view findings.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <details style="margin-top:16px">
+            <summary style="cursor:pointer;color:var(--muted)">Skipped components and query errors</summary>
+            <pre id="vulnerabilitySkipped" class="output show"></pre>
+          </details>
+        </div>
+      </article>
+
 
       <article class="card card-wide" id="history">
         <div class="card-heading"><span class="icon-box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.7"/><path d="M12 7v5l3.5 2" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M4 4v4h4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></span><div><h2>Verification history</h2><p class="card-intro">Browse stored registration records and reuse a verification ID.</p></div></div>
@@ -285,11 +358,16 @@
       clearStatus("verifyStatus");
       $("verifyResult").classList.remove("show");
       setStatus("verifyStatus", "Checking file digest and registered proof…");
+
+
       try {
         const formData = new FormData();
         formData.append("file", file);
-        const url = `/verify/${encodeURIComponent(verificationId)}?proof=${encodeURIComponent(proof)}`;
-        const data = await requestJson(url, { method: "POST", body: formData });
+        const data = await requestJson(`/verify/${encodeURIComponent(verificationId)}?proof=${encodeURIComponent(proof)}`, {
+          method: "POST",
+          body: formData
+        });
+
         const ok = data.status === "VERIFIED";
         setStatus("verifyStatus", ok ? "SBOM VERIFIED · File digest and proof matched" : (data.message || "SBOM NOT VERIFIED"), ok ? "ok" : "bad");
         showOutput("verifyResult", data);
@@ -300,26 +378,41 @@
       }
     });
 
+
     $("claimForm").addEventListener("submit", async (event) => {
       event.preventDefault();
+
       const verificationId = $("claimVerificationId").value.trim();
       const claim = $("claimValue").value.trim();
-      if (!verificationId || !claim) return;
+      const file = $("claimFile").files[0];
+
+      if (!verificationId || !claim || !file) {
+        setStatus("claimStatus", "Enter the verification ID and claim, and upload an SBOM file.", "bad");
+        return;
+      }
+
       const button = event.currentTarget.querySelector("button[type='submit']");
       button.disabled = true;
       clearStatus("claimStatus");
       $("claimResult").classList.remove("show");
-      setStatus("claimStatus", "Generating a Merkle proof and checking the selected claim…");
+      setStatus("claimStatus", "Checking the uploaded SBOM and selected claim…");
+
       try {
         const url = `/verify-claim/${encodeURIComponent(verificationId)}?claim=${encodeURIComponent(claim)}`;
-        const data = await requestJson(url, { method: "POST" });
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const data = await requestJson(url, {
+          method: "POST",
+          body: formData
+        });
+
         if (data.status === "VERIFIED" && data.proof_valid === true) {
           setStatus("claimStatus", "CLAIM VERIFIED · The proof matches the registered Merkle root", "ok");
-        } else if (data.status === "NOT VERIFIED" || data.proof_valid === false) {
-          setStatus("claimStatus", data.message || "CLAIM NOT VERIFIED · The claim was not validated", "bad");
         } else {
-          setStatus("claimStatus", data.message || "The API returned an error for this claim", "bad");
+          setStatus("claimStatus", data.message || "CLAIM NOT VERIFIED · The claim was not validated", "bad");
         }
+
         showOutput("claimResult", data);
       } catch (error) {
         setStatus("claimStatus", error.message || "Claim verification failed.", "bad");
@@ -327,6 +420,113 @@
         button.disabled = false;
       }
     });
+
+
+    $("vulnerabilityForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const file = $("vulnerabilityFile").files[0];
+      if (!file) return;
+
+      const button = event.currentTarget.querySelector("button[type='submit']");
+      button.disabled = true;
+      $("vulnerabilitySummary").hidden = true;
+      setStatus("vulnerabilityStatus", "Scanning supported packages using OSV…");
+
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const data = await requestJson("/scan-vulnerabilities", {
+          method: "POST",
+          body: formData
+        });
+
+        $("vulnChecked").textContent =
+          `${data.packages_checked ?? 0} / ${data.components_total ?? 0}`;
+
+        const total = Number(data.components_total) || 0;
+        const checked = Number(data.packages_checked) || 0;
+        const coverage = total ? Math.round(checked / total * 100) : 0;
+
+        $("vulnCoverage").textContent = `${coverage}% component coverage`;
+        $("vulnCount").textContent =
+          String(data.unique_package_vulnerabilities ?? 0);
+        $("vulnRisk").textContent = String(data.risk_score ?? "—");
+
+        $("vulnScanStatus").textContent =
+          `Scan status: ${data.scan_status || "UNKNOWN"}. ` +
+          `${data.findings_count ?? 0} finding record(s); ` +
+          `${data.components_skipped ?? 0} component(s) skipped; ` +
+          `${data.query_errors ?? 0} query error(s).`;
+
+        const body = $("vulnerabilityBody");
+        body.replaceChildren();
+
+        const findings = Array.isArray(data.findings) ? data.findings : [];
+
+        if (!findings.length) {
+          const row = document.createElement("tr");
+          const cell = document.createElement("td");
+          cell.colSpan = 5;
+          cell.className = "empty";
+          cell.textContent = "No vulnerability findings returned for the checked packages.";
+          row.appendChild(cell);
+          body.appendChild(row);
+        } else {
+          findings.forEach((finding) => {
+            const row = document.createElement("tr");
+
+            const severity = Array.isArray(finding.severity)
+              ? finding.severity.map((item) =>
+                  `${item.type || "Severity"}: ${item.score || "Not supplied"}`
+                ).join("\n")
+              : "Not supplied";
+
+            [
+              finding.package || "—",
+              finding.version || "—",
+              finding.id || "—",
+              finding.summary || "No summary supplied",
+              severity
+            ].forEach((value) => {
+              const cell = document.createElement("td");
+              cell.textContent = String(value);
+              row.appendChild(cell);
+            });
+
+            body.appendChild(row);
+          });
+        }
+
+        $("vulnerabilitySkipped").textContent = JSON.stringify({
+          skipped_components: data.skipped_components || [],
+          query_error_details: data.query_error_details || [],
+          risk_score_method: data.risk_score_method || "Not supplied"
+        }, null, 2);
+
+        $("vulnerabilitySummary").hidden = false;
+
+        if (data.scan_status === "COMPLETE") {
+          setStatus("vulnerabilityStatus", "Scan finished.", "ok");
+        } else {
+          setStatus(
+            "vulnerabilityStatus",
+            "Scan finished with incomplete coverage. Review skipped components and query errors.",
+            "neutral"
+          );
+        }
+      } catch (error) {
+        setStatus(
+          "vulnerabilityStatus",
+          error.message || "Vulnerability scan failed.",
+          "bad"
+        );
+      } finally {
+        button.disabled = false;
+      }
+    });
+
 
     function renderHistory(records) {
       const body = $("historyBody");

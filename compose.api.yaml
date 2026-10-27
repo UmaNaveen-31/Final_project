@@ -11,9 +11,9 @@ services:
 
     environment:
       SBOM_CLAIMS_KEY_FILE: /run/secrets/sbom_claims.key
+      SBOM_REPORT_SIGNING_KEY_FILE: /run/secrets/report-signing-key.pem
       FABRIC_SAMPLES_DIR: /fabric-samples
       FABRIC_CFG_PATH: /fabric-samples/config
-
     volumes:
       - type: bind
         source: ./app/verification.db
@@ -28,7 +28,10 @@ services:
         source: ${CLAIMS_KEY_FILE:?Set CLAIMS_KEY_FILE}
         target: /run/secrets/sbom_claims.key
         read_only: true
-
+      - type: bind
+        source: /home/sanjana/.config/sbom-sentinel/report-signing-key.pem
+        target: /run/secrets/report-signing-key.pem
+        read_only: true
     networks:
       - fabric_test
 

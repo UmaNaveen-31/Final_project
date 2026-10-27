@@ -1,0 +1,8 @@
+experiment,group,runs,mean_latency_ms,median_latency_ms,correct_outcomes,success_rate_percent,components_total,packages_checked,components_skipped,query_errors,findings_count,unique_package_vulnerabilities,risk_score,scan_status,evidence_file
+SBOM preparation,all,5,10.907,5.747,,,,,,,,,,,verification-latency.csv
+SBOM integrity verification,valid,5,103.584,99.171,5,100.0,,,,,,,,,verification-tamper-benchmark.csv
+SBOM integrity verification,tampered,5,106.186,111.966,5,100.0,,,,,,,,,verification-tamper-benchmark.csv
+Signed report verification,valid,5,6.023,3.252,5,100.0,,,,,,,,,compliance-signature-benchmark.csv
+Signed report verification,tampered,5,2.947,3.041,5,100.0,,,,,,,,,compliance-signature-benchmark.csv
+Vulnerability scan comparison,original,,,,,,50,15,35,0,20,20,100,PARTIAL,vulnerability-scan-comparison.csv
+Vulnerability scan comparison,package_only,,,,,,15,15,0,0,20,20,100,COMPLETE,vulnerability-scan-comparison.csv

@@ -1,3 +1,4 @@
+import hashlib
 from security.privacy import extract_selected_claims
 from policy.engine import evaluate_policy
 from security.report_signing import sign_report, verify_report
@@ -40,6 +41,7 @@ if "claims_json" not in columns:
 async def verify_claim(
     verification_id: str,
     claim: str,
+    file: UploadFile = File(...),
     merkle_proof: str | None = None
 ):
     db = SessionLocal()
@@ -57,7 +59,23 @@ async def verify_claim(
                 "status": "ERROR",
                 "message": "Verification record not found."
             }
+        uploaded_bytes = await file.read()
+        submitted_hash = hashlib.sha256(uploaded_bytes).hexdigest()
+        stored_hash = local_record.sbom_hash
 
+        if not stored_hash or submitted_hash != stored_hash:
+            return {
+                "verification_id": verification_id,
+                "claim": claim,
+                "status": "NOT VERIFIED",
+                "proof_valid": False,
+                "message": (
+                    "The uploaded SBOM hash does not match the registered "
+                    "SBOM. Tampering or a different file was detected."
+                ),
+                "submitted_hash": submitted_hash,
+                "stored_hash": stored_hash
+            }
         stored_root = local_record.merkle_root
 
         try:
@@ -521,3 +539,134 @@ async def download_compliance_report(verification_id: str):
 
     finally:
         db.close()
+
+
+@app.post("/scan-vulnerabilities")
+async def scan_vulnerabilities(file: UploadFile = File(...)):
+    import json
+    import urllib.request
+    import urllib.error
+    from collections import Counter
+    from fastapi import HTTPException
+
+    try:
+        sbom = json.loads(await file.read())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HTTPException(status_code=400, detail="Upload a valid JSON SBOM.")
+
+    components = sbom.get("components", [])
+    if not isinstance(components, list):
+        raise HTTPException(status_code=400, detail="SBOM components must be a list.")
+
+    findings = []
+    query_errors = []
+    skipped = []
+    checked = 0
+
+    for component in components:
+        if not isinstance(component, dict):
+            skipped.append({"reason": "Invalid component entry"})
+            continue
+
+        name = component.get("name")
+        version = component.get("version")
+        purl = component.get("purl", "")
+
+        if not name or not version:
+            is_file_path = (
+                isinstance(name, str)
+                and (
+                    name.startswith("/")
+                    or ".dist-info/" in name
+                    or name.endswith(("/METADATA", "/RECORD", "/top_level.txt"))
+                )
+            )
+
+            skipped.append({
+                "package": name,
+                "reason": (
+                    "File-level SBOM entry; not a package record"
+                    if is_file_path
+                    else "Missing package name or version"
+                )
+            })
+            continue
+        if not isinstance(purl, str) or not purl.startswith("pkg:pypi/"):
+            skipped.append({
+                "package": name,
+                "version": version,
+                "reason": "Currently supports PyPI packages only"
+            })
+            continue
+
+        payload = {
+            "version": str(version),
+            "package": {
+                "name": name,
+                "ecosystem": "PyPI"
+            }
+        }
+
+        request = urllib.request.Request(
+            "https://api.osv.dev/v1/query",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+
+        try:
+            with urllib.request.urlopen(request, timeout=12) as response:
+                result = json.loads(response.read().decode("utf-8"))
+
+            checked += 1
+
+            for vuln in result.get("vulns", []):
+                findings.append({
+                    "package": name,
+                    "version": version,
+                    "id": vuln.get("id"),
+                    "summary": vuln.get("summary", ""),
+                    "severity": vuln.get("severity", []),
+                    "references": [
+                        ref.get("url")
+                        for ref in vuln.get("references", [])
+                        if isinstance(ref, dict) and ref.get("url")
+                    ]
+                })
+
+        except Exception as exc:
+            query_errors.append({
+                "package": name,
+                "version": version,
+                "error": str(exc)
+            })
+
+    unique_ids = {
+        (item.get("package"), item.get("id"))
+        for item in findings
+        if item.get("id")
+    }
+
+    # Transparent provisional exposure score, NOT a CVSS score.
+    risk_score = min(100, len(unique_ids) * 5)
+
+    return {
+        "source": "OSV",
+        "filename": file.filename,
+        "components_total": len(components),
+        "packages_checked": checked,
+        "components_skipped": len(skipped),
+        "query_errors": len(query_errors),
+        "findings_count": len(findings),
+        "unique_package_vulnerabilities": len(unique_ids),
+        "risk_score": risk_score,
+        "risk_score_method": "5 points per unique package-vulnerability pair, capped at 100; not CVSS severity",
+        "scan_status": (
+            "COMPLETE"
+            if not skipped and not query_errors
+            else "PARTIAL"
+        ),
+        "findings": findings,
+        "skipped_components": skipped,
+        "query_error_details": query_errors
+    }

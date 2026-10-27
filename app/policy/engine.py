@@ -1,6 +1,5 @@
 ALLOWED_BOM_FORMATS = {"CycloneDX"}
-ALLOWED_SPEC_VERSIONS = {"1.4", "1.5", "1.6"}
-
+ALLOWED_SPEC_VERSIONS = {"1.4", "1.5", "1.6", "1.7"}
 WATCHED_COMPONENTS = {
     "fastapi",
     "pydantic",
