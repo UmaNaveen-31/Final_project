@@ -216,14 +216,26 @@ async def register_verification(file: UploadFile = File(...)):
         merkle_root = build_merkle_root(merkle_values)
 
         verification_id = "VER-" + uuid.uuid4().hex[:8].upper()
+        try:
+            blockchain_result = submit_verification(
+                verification_id,
+                proof,
+                claims.get("component_name"),
+                file_hash,
+                merkle_root
+            )
+        except RuntimeError as e:
+            if "Hyperledger Fabric is not configured" in str(e):
+                blockchain_result = {
+                    "status": "not_configured",
+                    "message": "Hyperledger Fabric is unavailable in this environment."
+                }
+            else:
+                raise
 
-        blockchain_result = submit_verification(
-            verification_id,
-            proof,
-            claims.get("component_name"),
-            file_hash,
-            merkle_root
-        )
+
+
+
         db = SessionLocal()
 
         verification = Verification(
