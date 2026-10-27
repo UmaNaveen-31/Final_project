@@ -266,40 +266,79 @@ async def register_verification(file: UploadFile = File(...)):
         os.remove(temp_path)
 
 @app.post("/verify/{verification_id}")
-async def verify_verification(verification_id: str, proof: str, file: UploadFile = File(...)):
-    blockchain_record = get_verification(verification_id)
-
-    record = json.loads(blockchain_record)
-    stored_proof = record.get("proof")
-    stored_hash = record.get("sbomHash")
-
-    suffix = os.path.splitext(file.filename or "")[1]
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp:
-        temp.write(await file.read())
-        temp_path = temp.name
+async def verify_verification(
+    verification_id: str,
+    proof: str,
+    file: UploadFile = File(...)
+):
+    db = SessionLocal()
 
     try:
-        submitted_hash = sha256_file(temp_path)
+        try:
+            blockchain_record = get_verification(verification_id)
+            record = json.loads(blockchain_record)
 
-        if proof == stored_proof and submitted_hash == stored_hash:
+            stored_proof = record.get("proof")
+            stored_hash = record.get("sbomHash")
+            component_name = record.get("componentName")
+            timestamp = record.get("timestamp")
+
+        except RuntimeError as e:
+            if "Hyperledger Fabric is not configured" not in str(e):
+                raise
+
+            record = db.query(Verification).filter(
+                Verification.verification_id == verification_id
+            ).first()
+
+            if record is None:
+                return {
+                    "verification_id": verification_id,
+                    "status": "NOT VERIFIED",
+                    "message": "Verification record not found."
+                }
+
+            stored_proof = record.proof
+            stored_hash = record.sbom_hash
+            component_name = record.component_name
+            timestamp = record.timestamp
+
+        suffix = os.path.splitext(file.filename or "")[1]
+
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=suffix
+        ) as temp:
+            temp.write(await file.read())
+            temp_path = temp.name
+
+        try:
+            submitted_hash = sha256_file(temp_path)
+
+            if proof == stored_proof and submitted_hash == stored_hash:
+                return {
+                    "verification_id": verification_id,
+                    "status": "VERIFIED",
+                    "message": "The submitted proof and SBOM hash match the verification record.",
+                    "component_name": component_name,
+                    "sbom_hash": submitted_hash,
+                    "timestamp": timestamp
+                }
+
             return {
                 "verification_id": verification_id,
-                "status": "VERIFIED",
-                "message": "The submitted proof and SBOM hash match the blockchain record.",
-                "component_name": record.get("componentName"),
-                "sbom_hash": submitted_hash,
-                "timestamp": record.get("timestamp")
+                "status": "NOT VERIFIED",
+                "message": "The submitted proof or SBOM hash does not match the verification record.",
+                "submitted_hash": submitted_hash,
+                "stored_hash": stored_hash
             }
 
-        return {
-            "verification_id": verification_id,
-            "status": "NOT VERIFIED",
-            "message": "The submitted proof or SBOM hash does not match the blockchain record.",
-            "submitted_hash": submitted_hash,
-            "stored_hash": stored_hash
-        }
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+
     finally:
-        os.remove(temp_path)
+        db.close()
+ 
 @app.get("/verification-history")
 async def verification_history():
     db = SessionLocal()
