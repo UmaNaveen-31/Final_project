@@ -1,18 +1,34 @@
+
 import os
 import subprocess
 import json
 
 FABRIC_SAMPLES_DIR = os.environ.get("FABRIC_SAMPLES_DIR")
-if not FABRIC_SAMPLES_DIR:
-    raise RuntimeError(
-        "Set FABRIC_SAMPLES_DIR to the location of the fabric-samples directory."
+
+if FABRIC_SAMPLES_DIR:
+    TEST_NETWORK = os.path.join(FABRIC_SAMPLES_DIR, "test-network")
+    FABRIC_BIN = os.path.join(FABRIC_SAMPLES_DIR, "bin")
+    FABRIC_CONFIG = os.environ.get(
+        "FABRIC_CFG_PATH",
+        os.path.join(FABRIC_SAMPLES_DIR, "config")
     )
-TEST_NETWORK = os.path.join(FABRIC_SAMPLES_DIR, "test-network")
-FABRIC_BIN = os.path.join(FABRIC_SAMPLES_DIR, "bin")
-FABRIC_CONFIG = os.path.join(FABRIC_SAMPLES_DIR, "config")
+else:
+    TEST_NETWORK = None
+    FABRIC_BIN = None
+    FABRIC_CONFIG = None
 
 
 def submit_verification(verification_id, proof, component_name, sbom_hash, merkle_root):
+    if not FABRIC_SAMPLES_DIR:
+        raise RuntimeError(
+            "Hyperledger Fabric is not configured in this environment."
+        )
+
+    if not os.path.isdir(TEST_NETWORK):
+        raise RuntimeError(
+            f"Fabric test network directory not found: {TEST_NETWORK}"
+        )
+
     args = json.dumps({
         "function": "createVerification",
         "Args": [verification_id, proof, component_name, sbom_hash, merkle_root]

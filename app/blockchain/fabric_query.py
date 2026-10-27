@@ -1,20 +1,33 @@
+
 import os
 import subprocess
 
 FABRIC_SAMPLES_DIR = os.environ.get("FABRIC_SAMPLES_DIR")
-if not FABRIC_SAMPLES_DIR:
-    raise RuntimeError(
-        "Set FABRIC_SAMPLES_DIR to the location of the fabric-samples directory."
+
+if FABRIC_SAMPLES_DIR:
+    TEST_NETWORK = os.path.join(FABRIC_SAMPLES_DIR, "test-network")
+    FABRIC_BIN = os.path.join(FABRIC_SAMPLES_DIR, "bin")
+    FABRIC_CONFIG = os.environ.get(
+        "FABRIC_CFG_PATH",
+        os.path.join(FABRIC_SAMPLES_DIR, "config")
     )
-TEST_NETWORK = os.path.join(FABRIC_SAMPLES_DIR, "test-network")
-FABRIC_BIN = os.path.join(FABRIC_SAMPLES_DIR, "bin")
-FABRIC_CONFIG = os.environ.get(
-    "FABRIC_CFG_PATH",
-    os.path.join(FABRIC_SAMPLES_DIR, "config"),
-)
+else:
+    TEST_NETWORK = None
+    FABRIC_BIN = None
+    FABRIC_CONFIG = None
 
 
 def get_verification(verification_id):
+    if not FABRIC_SAMPLES_DIR:
+        raise RuntimeError(
+            "Hyperledger Fabric is not configured in this environment."
+        )
+
+    if not os.path.isdir(TEST_NETWORK):
+        raise RuntimeError(
+            f"Fabric test network directory not found: {TEST_NETWORK}"
+        )
+
     env = os.environ.copy()
     env["PATH"] = f"{FABRIC_BIN}:{env.get('PATH', '')}"
     env["FABRIC_CFG_PATH"] = FABRIC_CONFIG
@@ -43,4 +56,4 @@ def get_verification(verification_id):
     if result.returncode != 0:
         raise RuntimeError(result.stderr or result.stdout)
 
-    return result.stdout.strip().splitlines()[-1].splitlines()[-1]
+    return result.stdout.strip().splitlines()[-1]
