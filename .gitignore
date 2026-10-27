@@ -50,3 +50,4 @@ app/web/index-backup.html
 # SBOM Sentinel local databases and backups
 app/verification.db
 app/verification.db.*
+app/research-evidence-summary.csv.bak
