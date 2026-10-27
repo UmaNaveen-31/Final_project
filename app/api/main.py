@@ -42,76 +42,85 @@ async def verify_claim(
     claim: str,
     merkle_proof: str | None = None
 ):
+    db = SessionLocal()
+
     try:
-        blockchain_record = get_verification(verification_id)
-        record = json.loads(blockchain_record)
-        stored_root = record.get("merkleRoot") or record.get("merkle_root")
+        local_record = (
+            db.query(Verification)
+            .filter(Verification.verification_id == verification_id)
+            .first()
+        )
+
+        if not local_record:
+            return {
+                "verification_id": verification_id,
+                "status": "ERROR",
+                "message": "Verification record not found."
+            }
+
+        stored_root = local_record.merkle_root
+
+        try:
+            blockchain_record = get_verification(verification_id)
+            blockchain_data = json.loads(blockchain_record)
+            blockchain_root = (
+                blockchain_data.get("merkleRoot")
+                or blockchain_data.get("merkle_root")
+            )
+
+            if blockchain_root and blockchain_root != stored_root:
+                return {
+                    "verification_id": verification_id,
+                    "status": "ERROR",
+                    "message": "The database Merkle root does not match the blockchain record."
+                }
+
+        except RuntimeError as e:
+            if "Hyperledger Fabric is not configured" not in str(e):
+                raise
 
         if not stored_root:
             return {
                 "verification_id": verification_id,
                 "status": "ERROR",
-                "message": "Merkle root is missing from the blockchain record."
+                "message": "Merkle root is missing from the verification record."
             }
 
         if merkle_proof:
-            # Backward-compatible support for a manually supplied proof.
             proof = json.loads(merkle_proof)
             proof_source = "provided"
         else:
-            # Generate the proof from the claims stored at registration.
             proof_source = "generated"
-            db = SessionLocal()
+
+            if not local_record.claims_json:
+                return {
+                    "verification_id": verification_id,
+                    "status": "ERROR",
+                    "message": "Stored claims are unavailable. Register the SBOM again."
+                }
+
+            claims = json.loads(decrypt_claims(local_record.claims_json))
+
+            merkle_values = (
+                [claims["bom_format"], claims["spec_version"]]
+                + [
+                    f'{item["name"]}:{item["version"]}'
+                    for item in claims["dependencies"]
+                ]
+            )
+
             try:
-                local_record = (
-                    db.query(Verification)
-                    .filter(Verification.verification_id == verification_id)
-                    .first()
-                )
+                claim_index = merkle_values.index(claim)
+            except ValueError:
+                return {
+                    "verification_id": verification_id,
+                    "claim": claim,
+                    "status": "NOT VERIFIED",
+                    "proof_valid": False,
+                    "message": "This claim was not found in the registered SBOM."
+                }
 
-                if not local_record or not local_record.claims_json:
-                    return {
-                        "verification_id": verification_id,
-                        "status": "ERROR",
-                        "message": (
-                            "Automatic proof generation is unavailable for this "
-                            "older registration. Register the SBOM again."
-                        )
-                    }
-
-                if local_record.merkle_root != stored_root:
-                    return {
-                        "verification_id": verification_id,
-                        "status": "ERROR",
-                        "message": (
-                            "The local Merkle root does not match the "
-                            "blockchain record."
-                        )
-                    }
-
-                claims = json.loads(decrypt_claims(local_record.claims_json))
-                merkle_values = (
-                    [claims["bom_format"], claims["spec_version"]]
-                    + [
-                        f'{item["name"]}:{item["version"]}'
-                        for item in claims["dependencies"]
-                    ]
-                )
-
-                try:
-                    claim_index = merkle_values.index(claim)
-                except ValueError:
-                    return {
-                        "verification_id": verification_id,
-                        "claim": claim,
-                        "status": "NOT VERIFIED",
-                        "proof_valid": False,
-                        "message": "This claim was not found in the registered SBOM."
-                    }
-
-                proof = build_merkle_proof(merkle_values, claim_index)
-            finally:
-                db.close()
+            proof = build_merkle_proof(merkle_values, claim_index)
 
         valid = verify_merkle_proof(claim, proof, stored_root)
 
@@ -131,6 +140,8 @@ async def verify_claim(
             "status": "ERROR",
             "message": str(e)
         }
+    finally:
+        db.close()
 
 
 
