@@ -32,3 +32,17 @@ tests/test_sample.txt
 fabric-samples/
 app/tests/test_sample.txt
 app/web/index-backup.html
+.env.local
+# Local secrets and private keys
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Local database files and backups
+*.db
+*.db-*
+*.backup
+*.backup-*
+*.before-*

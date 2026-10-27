@@ -1,0 +1,38 @@
+services:
+  sbom-verifier-api:
+    build:
+      context: ./app
+    image: sbom-verifier-api
+    container_name: sbom-verifier-api
+    restart: unless-stopped
+
+    ports:
+      - "127.0.0.1:8000:8000"
+
+    environment:
+      SBOM_CLAIMS_KEY_FILE: /run/secrets/sbom_claims.key
+      FABRIC_SAMPLES_DIR: /fabric-samples
+      FABRIC_CFG_PATH: /fabric-samples/config
+
+    volumes:
+      - type: bind
+        source: ./app/verification.db
+        target: /app/verification.db
+
+      - type: bind
+        source: ${HOST_FABRIC_SAMPLES_DIR:?Set HOST_FABRIC_SAMPLES_DIR}
+        target: /fabric-samples
+        read_only: true
+
+      - type: bind
+        source: ${CLAIMS_KEY_FILE:?Set CLAIMS_KEY_FILE}
+        target: /run/secrets/sbom_claims.key
+        read_only: true
+
+    networks:
+      - fabric_test
+
+networks:
+  fabric_test:
+    external: true
+    name: fabric_test

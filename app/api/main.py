@@ -1,3 +1,9 @@
+from security.privacy import extract_selected_claims
+from policy.engine import evaluate_policy
+from security.report_signing import sign_report, verify_report
+
+
+from sqlalchemy import inspect, text
 from database.database import engine
 from database.database import SessionLocal
 from database.models import Base, Verification
@@ -8,8 +14,9 @@ from fastapi.responses import FileResponse
 from security.crypto import sha256_file
 
 from security.privacy import extract_selected_claims
+from security.claims_encryption import encrypt_claims, decrypt_claims
 from security.proof import generate_proof
-from security.merkle import build_merkle_root, verify_merkle_proof
+from security.merkle import build_merkle_root, build_merkle_proof, verify_merkle_proof
 import os
 import tempfile
 import json
@@ -17,13 +24,25 @@ import json
 app = FastAPI(title="Confidential SBOM Verification API")
 Base.metadata.create_all(bind=engine)
 
+# Add claims_json to existing databases without deleting existing records.
+columns = {col["name"] for col in inspect(engine).get_columns("verifications")}
+if "claims_json" not in columns:
+    with engine.begin() as connection:
+        connection.execute(
+            text("ALTER TABLE verifications ADD COLUMN claims_json TEXT")
+        )
+
+
 @app.post("/verify-claim/{verification_id}")
-async def verify_claim(verification_id: str, claim: str, merkle_proof: str):
+async def verify_claim(
+    verification_id: str,
+    claim: str,
+    merkle_proof: str | None = None
+):
     try:
         blockchain_record = get_verification(verification_id)
         record = json.loads(blockchain_record)
-
-        stored_root = record.get("merkleRoot")
+        stored_root = record.get("merkleRoot") or record.get("merkle_root")
 
         if not stored_root:
             return {
@@ -32,19 +51,75 @@ async def verify_claim(verification_id: str, claim: str, merkle_proof: str):
                 "message": "Merkle root is missing from the blockchain record."
             }
 
-        proof = json.loads(merkle_proof)
+        if merkle_proof:
+            # Backward-compatible support for a manually supplied proof.
+            proof = json.loads(merkle_proof)
+            proof_source = "provided"
+        else:
+            # Generate the proof from the claims stored at registration.
+            proof_source = "generated"
+            db = SessionLocal()
+            try:
+                local_record = (
+                    db.query(Verification)
+                    .filter(Verification.verification_id == verification_id)
+                    .first()
+                )
 
-        valid = verify_merkle_proof(
-            claim,
-            proof,
-            stored_root
-        )
+                if not local_record or not local_record.claims_json:
+                    return {
+                        "verification_id": verification_id,
+                        "status": "ERROR",
+                        "message": (
+                            "Automatic proof generation is unavailable for this "
+                            "older registration. Register the SBOM again."
+                        )
+                    }
+
+                if local_record.merkle_root != stored_root:
+                    return {
+                        "verification_id": verification_id,
+                        "status": "ERROR",
+                        "message": (
+                            "The local Merkle root does not match the "
+                            "blockchain record."
+                        )
+                    }
+
+                claims = json.loads(decrypt_claims(local_record.claims_json))
+                merkle_values = (
+                    [claims["bom_format"], claims["spec_version"]]
+                    + [
+                        f'{item["name"]}:{item["version"]}'
+                        for item in claims["dependencies"]
+                    ]
+                )
+
+                try:
+                    claim_index = merkle_values.index(claim)
+                except ValueError:
+                    return {
+                        "verification_id": verification_id,
+                        "claim": claim,
+                        "status": "NOT VERIFIED",
+                        "proof_valid": False,
+                        "message": "This claim was not found in the registered SBOM."
+                    }
+
+                proof = build_merkle_proof(merkle_values, claim_index)
+            finally:
+                db.close()
+
+        valid = verify_merkle_proof(claim, proof, stored_root)
 
         return {
             "verification_id": verification_id,
             "claim": claim,
             "merkle_root": stored_root,
-            "proof_valid": valid
+            "proof_valid": valid,
+            "status": "VERIFIED" if valid else "NOT VERIFIED",
+            "proof_source": proof_source,
+            "merkle_proof": proof
         }
 
     except Exception as e:
@@ -53,7 +128,7 @@ async def verify_claim(verification_id: str, claim: str, merkle_proof: str):
             "status": "ERROR",
             "message": str(e)
         }
-    
+
 
 
 @app.post("/hash-sbom")
@@ -154,6 +229,7 @@ async def register_verification(file: UploadFile = File(...)):
             proof=proof,
             merkle_root=merkle_root,
             component_name=claims.get("component_name"),
+            claims_json=encrypt_claims(json.dumps(claims)),
             timestamp=datetime.now().isoformat()
         )
 
@@ -238,3 +314,145 @@ async def ui():
             "index.html"
         )
     )
+
+from fastapi import HTTPException
+from pydantic import BaseModel
+
+
+class ComplianceReportRequest(BaseModel):
+    verification_id: str
+
+
+class SignedReportVerificationRequest(BaseModel):
+    report: dict
+    signature: str
+
+
+@app.post("/compliance-report/{verification_id}")
+async def create_compliance_report(verification_id: str):
+    db = SessionLocal()
+
+    try:
+        record = (
+            db.query(Verification)
+            .filter(Verification.verification_id == verification_id)
+            .first()
+        )
+
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Verification record not found."
+            )
+
+        if not record.claims_json:
+            raise HTTPException(
+                status_code=400,
+                detail="No stored claims are available for this record."
+            )
+
+        try:
+            claims = json.loads(decrypt_claims(record.claims_json))
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="Stored claims could not be decrypted."
+            )
+
+        policy_result = evaluate_policy(claims)
+
+        report = {
+            "report_type": "SBOM Compliance Report",
+            "report_version": "1.0",
+            "verification_id": record.verification_id,
+            "sbom_sha256": record.sbom_hash,
+            "merkle_root": record.merkle_root,
+            "policy": policy_result,
+            "issued_at": datetime.utcnow().isoformat() + "Z"
+        }
+
+        signature = sign_report(report)
+
+        return {
+            "report": report,
+            "signature": signature,
+            "signature_algorithm": "Ed25519"
+        }
+
+    finally:
+        db.close()
+
+
+@app.post("/verify-compliance-report")
+async def verify_compliance_report(
+    request: SignedReportVerificationRequest
+):
+    valid = verify_report(request.report, request.signature)
+
+    return {
+        "signature_valid": valid,
+        "status": "VALID" if valid else "INVALID"
+    }
+
+from fastapi.responses import JSONResponse
+
+
+@app.get("/download-compliance-report/{verification_id}")
+async def download_compliance_report(verification_id: str):
+    db = SessionLocal()
+
+    try:
+        record = (
+            db.query(Verification)
+            .filter(Verification.verification_id == verification_id)
+            .first()
+        )
+
+        if record is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Verification record not found."
+            )
+
+        if not record.claims_json:
+            raise HTTPException(
+                status_code=400,
+                detail="No stored claims are available."
+            )
+
+        try:
+            claims = json.loads(decrypt_claims(record.claims_json))
+        except Exception:
+            raise HTTPException(
+                status_code=500,
+                detail="Stored claims could not be decrypted."
+            )
+
+        policy_result = evaluate_policy(claims)
+
+        report = {
+            "report_type": "SBOM Compliance Report",
+            "report_version": "1.0",
+            "verification_id": record.verification_id,
+            "sbom_sha256": record.sbom_hash,
+            "merkle_root": record.merkle_root,
+            "policy": policy_result,
+            "issued_at": datetime.utcnow().isoformat() + "Z"
+        }
+
+        signature = sign_report(report)
+
+        return JSONResponse(
+            content={
+                "report": report,
+                "signature": signature,
+                "signature_algorithm": "Ed25519"
+            },
+            headers={
+                "Content-Disposition":
+                    f'attachment; filename="compliance-report-{verification_id}.json"'
+            }
+        )
+
+    finally:
+        db.close()

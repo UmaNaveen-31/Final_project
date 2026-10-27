@@ -1,9 +1,17 @@
 import os
 import subprocess
 
-TEST_NETWORK = os.path.expanduser("~/sbom-project/fabric-samples/test-network")
-FABRIC_BIN = os.path.expanduser("~/sbom-project/fabric-samples/bin")
-FABRIC_CONFIG = os.path.expanduser("~/sbom-project/fabric-samples/config")
+FABRIC_SAMPLES_DIR = os.environ.get("FABRIC_SAMPLES_DIR")
+if not FABRIC_SAMPLES_DIR:
+    raise RuntimeError(
+        "Set FABRIC_SAMPLES_DIR to the location of the fabric-samples directory."
+    )
+TEST_NETWORK = os.path.join(FABRIC_SAMPLES_DIR, "test-network")
+FABRIC_BIN = os.path.join(FABRIC_SAMPLES_DIR, "bin")
+FABRIC_CONFIG = os.environ.get(
+    "FABRIC_CFG_PATH",
+    os.path.join(FABRIC_SAMPLES_DIR, "config"),
+)
 
 
 def get_verification(verification_id):
@@ -15,7 +23,7 @@ def get_verification(verification_id):
         source scripts/envVar.sh
         setGlobals 1
         export CORE_PEER_LOCALMSPID="$CORE_PEER_LOCALMSPID"
-        export CORE_PEER_ADDRESS="$CORE_PEER_ADDRESS"
+        export CORE_PEER_ADDRESS=peer0.org1.example.com:7051
         export CORE_PEER_TLS_ROOTCERT_FILE="$CORE_PEER_TLS_ROOTCERT_FILE"
         export CORE_PEER_MSPCONFIGPATH="$CORE_PEER_MSPCONFIGPATH"
         peer chaincode query \

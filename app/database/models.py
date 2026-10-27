@@ -12,5 +12,6 @@ class Verification(Base):
     proof = Column(String)
     merkle_root = Column(String)
     component_name = Column(String)
+    claims_json = Column(Text, nullable=True)
     timestamp = Column(String)
 

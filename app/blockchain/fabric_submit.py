@@ -2,8 +2,14 @@ import os
 import subprocess
 import json
 
-TEST_NETWORK = os.path.expanduser("~/sbom-project/fabric-samples/test-network")
-FABRIC_BIN = os.path.expanduser("~/sbom-project/fabric-samples/bin")
+FABRIC_SAMPLES_DIR = os.environ.get("FABRIC_SAMPLES_DIR")
+if not FABRIC_SAMPLES_DIR:
+    raise RuntimeError(
+        "Set FABRIC_SAMPLES_DIR to the location of the fabric-samples directory."
+    )
+TEST_NETWORK = os.path.join(FABRIC_SAMPLES_DIR, "test-network")
+FABRIC_BIN = os.path.join(FABRIC_SAMPLES_DIR, "bin")
+FABRIC_CONFIG = os.path.join(FABRIC_SAMPLES_DIR, "config")
 
 
 def submit_verification(verification_id, proof, component_name, sbom_hash, merkle_root):
@@ -14,21 +20,22 @@ def submit_verification(verification_id, proof, component_name, sbom_hash, merkl
 
     env = os.environ.copy()
     env["PATH"] = f"{FABRIC_BIN}:{env.get('PATH', '')}"
-    env["FABRIC_CFG_PATH"] = os.path.expanduser("~/sbom-project/fabric-samples/config")
+    env["FABRIC_CFG_PATH"] = FABRIC_CONFIG
 
     command = f'''
         source scripts/envVar.sh
         setGlobals 1
+        export CORE_PEER_ADDRESS=peer0.org1.example.com:7051
         peer chaincode invoke \
-          -o localhost:7050 \
+          -o orderer.example.com:7050 \
           --ordererTLSHostnameOverride orderer.example.com \
           --tls \
           --cafile "$ORDERER_CA" \
           -C sbomchannel \
           -n sbom-verifier \
-          --peerAddresses localhost:7051 \
+          --peerAddresses peer0.org1.example.com:7051 \
           --tlsRootCertFiles "$PEER0_ORG1_CA" \
-          --peerAddresses localhost:9051 \
+          --peerAddresses peer0.org2.example.com:9051 \
           --tlsRootCertFiles "$PEER0_ORG2_CA" \
           -c '{args}' \
           --waitForEvent
