@@ -22,6 +22,9 @@ import tempfile
 import json
 
 app = FastAPI(title="Confidential SBOM Verification API")
+@app.get("/healthz")
+def health_check():
+    return {"status": "ok"}
 Base.metadata.create_all(bind=engine)
 
 # Add claims_json to existing databases without deleting existing records.
